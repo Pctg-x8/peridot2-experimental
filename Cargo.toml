@@ -1,0 +1,19 @@
+[package]
+name = "peridot2"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+async-std = { version = "1.12.0", features = ["attributes"] }
+bedrock = { path = "../bedrock", features = [
+    "Implements",
+    "Presentation",
+    "VK_MVK_macos_surface",
+    "VK_EXT_debug_utils",
+    "VK_KHR_portability_enumeration",
+] }
+appkit = { path = "../appkit-rs" }
+objc = "0.2.7"
+futures-util = "0.3.30"
+objc-ext = { git = "https://github.com/Pctg-x8/objc-ext" }
