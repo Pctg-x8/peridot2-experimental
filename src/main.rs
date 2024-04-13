@@ -514,21 +514,19 @@ async fn game_main<'d, Device: br::Device + ?Sized + 'd>(
                     1.0 / dt
                 );
 
-                if last_render_occured {
-                    if last_render_fence.status().expect("Failed to get status") {
-                        t = std::time::Instant::now();
-                        last_render_fence
-                            .reset()
-                            .expect("Failed to reset last render fence");
-                        last_render_occured = false;
-                    } else {
-                        // previous rendering does not completed.
-                        println!("frameskip");
-                        continue;
-                    }
-                } else {
-                    t = std::time::Instant::now();
+                t = std::time::Instant::now();
+
+                if last_render_occured && !last_render_fence.status().expect("Failed to get status")
+                {
+                    // previous rendering does not completed.
+                    println!("frameskip");
+                    continue;
                 }
+
+                last_render_fence
+                    .reset()
+                    .expect("Failed to reset last render fence");
+                last_render_occured = false;
 
                 let back_buffer_index = engine
                     .swapchain
