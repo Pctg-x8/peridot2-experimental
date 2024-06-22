@@ -1,2 +1,4 @@
 /target
 *.spv
+*.fspv
+*.vspv
