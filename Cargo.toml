@@ -1,3 +1,10 @@
+workspace.members = [
+    "support-crates/epoll",
+    "support-crates/eventfd",
+    "support-crates/wayland-client",
+    "support-crates/wayland-sys",
+]
+
 [package]
 name = "peridot2"
 version = "0.1.0"
@@ -9,11 +16,21 @@ async-std = { version = "1.12.0", features = ["attributes"] }
 bedrock = { path = "../bedrock", features = [
     "Implements",
     "Presentation",
-    "VK_MVK_macos_surface",
     "VK_EXT_debug_utils",
-    "VK_KHR_portability_enumeration",
 ] }
+futures-util = "0.3.30"
+
+[target.'cfg(target_os = "macos")'.dependencies]
 appkit = { path = "../appkit-rs" }
 objc = "0.2.7"
-futures-util = "0.3.30"
 objc-ext = { git = "https://github.com/Pctg-x8/objc-ext" }
+bedrock = { path = "../bedrock", features = [
+    "VK_MVK_macos_surface",
+    "VK_KHR_portability_enumeration",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+wayland-client.path = "./support-crates/wayland-client"
+bedrock = { path = "../bedrock", features = ["VK_KHR_wayland_surface"] }
+epoll.path = "./support-crates/epoll"
+eventfd.path = "./support-crates/eventfd"

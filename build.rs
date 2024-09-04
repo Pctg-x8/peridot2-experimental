@@ -1,3 +1,4 @@
+#[cfg(target_os = "macos")]
 fn main() {
     let vk_sdk_base = std::path::PathBuf::from(env!("VULKAN_SDK"))
         .parent()
@@ -17,3 +18,6 @@ fn main() {
     // println!("cargo:rustc-link-lib=framework=IOSurface");
     // println!("cargo:rustc-link-lib=framework=IOKit");
 }
+
+#[cfg(target_os = "linux")]
+fn main() {}

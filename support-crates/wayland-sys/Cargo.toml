@@ -1,0 +1,7 @@
+[package]
+name = "wayland-sys"
+description = "ffi definitions for libwayland"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]

@@ -1,0 +1,9 @@
+[package]
+name = "wayland-client"
+description = "rustic client implementation of wayland protocol"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wayland-sys.path = "../wayland-sys"
+bitflags = "2.6"
