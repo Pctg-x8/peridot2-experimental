@@ -224,15 +224,16 @@ pub async fn wayland_main(mut dp: WlDisplayConnection) -> Result<(), Box<dyn std
         }
 
         let instance = {
-            let mut builder =
-                br::InstanceBuilder::new("peridot2-test", (0, 1, 0), "Peridot 2", (0, 1, 0));
+            let app =
+                br::ApplicationInfo::new(c"peridot2-test", (0, 1, 0), c"Peridot 2", (0, 1, 0));
+            let mut builder = br::InstanceBuilder::new(&app);
             builder
                 .add_extensions([
-                    "VK_EXT_debug_utils",
-                    "VK_KHR_wayland_surface",
-                    "VK_KHR_surface",
+                    c"VK_EXT_debug_utils",
+                    c"VK_KHR_wayland_surface",
+                    c"VK_KHR_surface",
                 ])
-                .add_layer("VK_LAYER_KHRONOS_validation");
+                .add_layer(c"VK_LAYER_KHRONOS_validation");
 
             builder.create().expect("Failed to create instance")
         };
@@ -266,10 +267,10 @@ pub async fn wayland_main(mut dp: WlDisplayConnection) -> Result<(), Box<dyn std
         );
         let device = {
             let queue_family_builder =
-                br::DeviceQueueCreateInfo::new(graphics_queue_family_index).add(0.0);
+                br::DeviceQueueCreateInfo::new(graphics_queue_family_index, &[0.0]);
             let mut builder = br::DeviceBuilder::new(&adapter);
             builder
-                .add_extension("VK_KHR_swapchain")
+                .add_extension(c"VK_KHR_swapchain")
                 .add_queue(queue_family_builder);
 
             builder.create().expect("Failed to create device")

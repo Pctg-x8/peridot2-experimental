@@ -3,7 +3,8 @@ use std::sync::Arc;
 use bedrock::{
     self as br, CommandBufferMut, CommandPoolMut, DescriptorPoolMut, DeviceChild, DeviceMemory,
     Fence, FenceMut, GraphicsPipelineBuilder, ImageSubresourceSlice, MemoryBound,
-    PipelineShaderStageProvider, Queue, RenderPass, Status, Swapchain, VulkanStructure,
+    PipelineShaderStageProvider, QueueMut, RenderPass, SemaphoreMut, ShaderModule, Status,
+    Swapchain, VulkanStructure,
 };
 
 pub struct Engine<'d, Device: br::Device + ?Sized + 'd> {
@@ -20,18 +21,17 @@ impl<'d, Device: br::Device + ?Sized + 'd> Engine<'d, Device> {
 
     pub fn submit_graphics_work<'r>(
         &mut self,
-        batches: impl IntoIterator<Item = br::SubmissionBatch2<'r>>,
-        fence: Option<&mut (impl br::Fence + br::VkHandleMut)>,
+        batches: &'r [br::SubmissionBatch3<'r>],
+        fence: Option<br::FenceMutRef>,
     ) -> br::Result<()> {
-        self.q.submit_alt(batches, fence)
+        self.q.submit_alt3(batches, fence)
     }
 
     pub fn submit_graphics_work_and_wait<'r>(
         &mut self,
-        batches: impl IntoIterator<Item = br::SubmissionBatch2<'r>>,
-        fence: Option<&mut (impl br::Fence + br::VkHandleMut)>,
+        batches: &'r [br::SubmissionBatch3<'r>],
     ) -> br::Result<()> {
-        self.q.submit_alt(batches, fence)?;
+        self.q.submit_alt3(batches, None)?;
         self.q.wait()?;
 
         Ok(())
@@ -116,11 +116,6 @@ pub async fn game_main<'d, Device: br::Device + 'd>(
             br::ImageLayout::PresentSrc,
         )
         .color_memory_op(br::LoadOp::Clear, br::StoreOp::Store);
-        let main_subpass = br::SubpassDescription::new().add_color_output(
-            0,
-            br::ImageLayout::ColorAttachmentOpt,
-            None,
-        );
         let enter_dependency = br::vk::VkSubpassDependency {
             srcSubpass: br::vk::VK_SUBPASS_EXTERNAL,
             dstSubpass: 0,
@@ -140,12 +135,19 @@ pub async fn game_main<'d, Device: br::Device + 'd>(
             dependencyFlags: br::vk::VK_DEPENDENCY_BY_REGION_BIT,
         };
 
-        br::RenderPassBuilder::new()
-            .add_attachments([main_attachment])
-            .add_subpasses([main_subpass])
-            .add_dependencies([enter_dependency, leave_dependency])
-            .create(engine.device())
-            .expect("Failed to create render pass")
+        br::RenderPassBuilder::new(
+            &[main_attachment],
+            &[br::SubpassDescription::new().color_attachments(
+                &[br::AttachmentReference::new(
+                    0,
+                    br::ImageLayout::ColorAttachmentOpt,
+                )],
+                &[],
+            )],
+            &[enter_dependency, leave_dependency],
+        )
+        .create(engine.device())
+        .expect("Failed to create render pass")
     };
 
     let back_buffers = engine
@@ -319,15 +321,12 @@ pub async fn game_main<'d, Device: br::Device + 'd>(
     .end()
     .expect("Failed to record init commands");
     engine
-        .submit_graphics_work_and_wait(
-            [br::SubmissionBatch2::new(
-                &[] as &[br::SemaphoreRef<br::SemaphoreObject<Device>>],
-                &[],
-                &[tmp_cb],
-                &[] as &[br::SemaphoreRef<br::SemaphoreObject<Device>>],
-            )],
-            None::<&mut br::FenceObject<Device>>,
-        )
+        .submit_graphics_work_and_wait(&[br::SubmissionBatch3::new_wait_semaphore_array(
+            &[],
+            &[],
+            &[tmp_cb.as_transparent_ref()],
+            &[],
+        )])
         .expect("Failed to submit init commands");
     drop(tmp_cp);
     drop(upload_buffer);
@@ -344,17 +343,20 @@ pub async fn game_main<'d, Device: br::Device + 'd>(
         .device()
         .new_shader_module_ref(&frag_shader_blob)
         .expect("Failed to create frag shader module");
-    let dsl_ub1 = br::DescriptorSetLayoutBuilder::new()
-        .bind(
-            br::DescriptorType::UniformBuffer
-                .make_binding(1)
-                .only_for_vertex(),
-        )
-        .create(engine.device())
-        .expect("Failed to create descriptor set layout");
-    let pl = br::PipelineLayoutBuilder::new(vec![&dsl_ub1], vec![(br::ShaderStage::VERTEX, 0..8)])
-        .create(engine.device())
-        .expect("Failed to create pipellne layout");
+    let dsl_ub1 = br::DescriptorSetLayoutBuilder::new(&[br::DescriptorType::UniformBuffer
+        .make_binding(0, 1)
+        .only_for_vertex()])
+    .create(engine.device())
+    .expect("Failed to create descriptor set layout");
+    let pl = br::PipelineLayoutBuilder::new(
+        &[br::DescriptorSetLayoutObjectRef::new(&dsl_ub1)],
+        &[br::PushConstantRange::for_type::<[f32; 2]>(
+            br::ShaderStage::VERTEX,
+            0,
+        )],
+    )
+    .create(engine.device())
+    .expect("Failed to create pipellne layout");
     let vbind = [br::VertexInputBindingDescription::per_vertex_typed::<Vertex>(0)];
     let vattr = [
         br::vk::VkVertexInputAttributeDescription {
@@ -375,14 +377,8 @@ pub async fn game_main<'d, Device: br::Device + 'd>(
             &pl,
             render_pass.subpass(0),
             br::VertexProcessingStages::new(
-                br::VertexShaderStage::new(br::PipelineShader2::new(
-                    &vert_shader,
-                    c"main".to_owned(),
-                ))
-                .with_fragment_shader_stage(br::PipelineShader2::new(
-                    &frag_shader,
-                    c"main".to_owned(),
-                )),
+                br::VertexShaderStage::new(vert_shader.with_entry_point(c"main"))
+                    .with_fragment_shader_stage(frag_shader.with_entry_point(c"main")),
                 &vbind,
                 &vattr,
                 br::vk::VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -401,10 +397,10 @@ pub async fn game_main<'d, Device: br::Device + 'd>(
             .expect("Failed to create render pipeline")
     };
 
-    let mut descriptor_pool = br::DescriptorPoolBuilder::new(1)
-        .reserve(br::DescriptorType::UniformBuffer.with_count(1))
-        .create(engine.device())
-        .expect("Failed to create descriptor pool");
+    let mut descriptor_pool =
+        br::DescriptorPoolBuilder::new(1, &[br::DescriptorType::UniformBuffer.make_size(1)])
+            .create(engine.device())
+            .expect("Failed to create descriptor pool");
     let [object_descriptor] = descriptor_pool
         .alloc_array(&[br::DescriptorSetLayoutObjectRef::new(&dsl_ub1)])
         .expect("Failed to allocate descriptor set");
@@ -452,7 +448,7 @@ pub async fn game_main<'d, Device: br::Device + 'd>(
         .expect("Command error");
     }
 
-    let render_ready = br::SemaphoreBuilder::new()
+    let mut render_ready = br::SemaphoreBuilder::new()
         .create(engine.device())
         .expect("Failed to create render ready semaphore");
     let updated = br::SemaphoreBuilder::new()
@@ -583,34 +579,32 @@ pub async fn game_main<'d, Device: br::Device + 'd>(
                     .swapchain
                     .acquire_next(
                         None,
-                        br::CompletionHandler::<br::FenceObject<&'d Device>, _>::Queue(
-                            &render_ready,
-                        ),
+                        br::CompletionHandlerMut::Queue(render_ready.as_transparent_mut_ref()),
                     )
                     .expect("Failed to acquire back buffer");
                 engine
                     .submit_graphics_work(
-                        [
-                            br::SubmissionBatch2::new(
-                                &[] as &[br::SemaphoreRef<br::SemaphoreObject<Device>>],
+                        &[
+                            br::SubmissionBatch3::new_wait_semaphore_array(
                                 &[],
-                                &[update_commands],
+                                &[],
+                                &[update_commands.as_transparent_ref()],
                                 &[updated.as_transparent_ref()],
                             ),
-                            br::SubmissionBatch2::new(
+                            br::SubmissionBatch3::new_wait_semaphore_array(
                                 &[
                                     render_ready.as_transparent_ref(),
                                     updated.as_transparent_ref(),
                                 ],
                                 &[
-                                    br::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT.0,
-                                    br::PipelineStageFlags::VERTEX_SHADER.0,
+                                    br::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                                    br::PipelineStageFlags::VERTEX_SHADER,
                                 ],
-                                &[render_cb[back_buffer_index as usize]],
+                                &[render_cb[back_buffer_index as usize].as_transparent_ref()],
                                 &[present_ready.as_transparent_ref()],
                             ),
                         ],
-                        Some(&mut last_render_fence),
+                        Some(last_render_fence.as_transparent_mut_ref()),
                     )
                     .expect("Failed to submit work");
                 engine
