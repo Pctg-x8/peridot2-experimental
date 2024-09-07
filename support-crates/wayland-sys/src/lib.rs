@@ -1,4 +1,5 @@
 #![allow(non_camel_case_types)]
+#![cfg(unix)]
 
 use core::ffi::*;
 

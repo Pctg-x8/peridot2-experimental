@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
 
 #[repr(transparent)]

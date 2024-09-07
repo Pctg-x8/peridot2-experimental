@@ -21,3 +21,13 @@ fn main() {
 
 #[cfg(target_os = "linux")]
 fn main() {}
+
+#[cfg(target_os = "windows")]
+fn main() {
+    let vk_sdk_base = std::path::PathBuf::from(env!("VULKAN_SDK"));
+
+    println!(
+        "cargo:rustc-link-search=static={}",
+        vk_sdk_base.join("Lib").display()
+    );
+}

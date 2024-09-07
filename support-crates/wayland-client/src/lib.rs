@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 mod display;
 pub use display::*;
 mod registry;
