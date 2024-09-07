@@ -6,6 +6,7 @@ use bedrock::{
     PipelineShaderStageProvider, QueueMut, RenderPass, SemaphoreMut, ShaderModule, Status,
     Swapchain, VulkanStructure,
 };
+use futures_util::FutureExt;
 
 pub struct Engine<'d, Device: br::Device + ?Sized + 'd> {
     pub graphics_queue_family_index: u32,
@@ -87,7 +88,6 @@ impl<'d, Device: br::Device + ?Sized + 'd> Engine<'d, Device> {
 
 pub enum EngineEvents {
     Shutdown,
-    NextFrame,
 }
 
 #[repr(C)]
@@ -106,6 +106,7 @@ pub struct UniformData {
 pub async fn game_main<'d, Device: br::Device + 'd>(
     mut engine: Engine<'d, Device>,
     event_bus: async_std::channel::Receiver<EngineEvents>,
+    frame_request_bus: async_std::channel::Receiver<()>,
 ) {
     println!("mainloop ready");
 
@@ -491,23 +492,23 @@ pub async fn game_main<'d, Device: br::Device + 'd>(
 
     let mut rot = 0.0f32;
     let mut t = std::time::Instant::now();
+    let mut presentation_suspending = false;
     loop {
-        match event_bus.recv().await.expect("Failed to receive events") {
-            EngineEvents::Shutdown => break,
-            EngineEvents::NextFrame => {
-                let dt = t.elapsed().as_secs_f64();
-                println!(
-                    "(th {:?}) frame: {dt} (approx {} fps)",
-                    std::thread::current().id(),
-                    1.0 / dt
-                );
-
-                t = std::time::Instant::now();
+        futures_util::select! {
+            e = event_bus.recv().fuse() => match e.unwrap() {
+                EngineEvents::Shutdown => break,
+            },
+            r = frame_request_bus.recv().fuse() => {
+                r.unwrap();
 
                 if last_render_occured && !last_render_fence.status().expect("Failed to get status")
                 {
                     // previous rendering does not completed.
-                    println!("frameskip");
+                    // println!("frameskip");
+                    continue;
+                }
+
+                if presentation_suspending {
                     continue;
                 }
 
@@ -515,6 +516,15 @@ pub async fn game_main<'d, Device: br::Device + 'd>(
                     .reset()
                     .expect("Failed to reset last render fence");
                 last_render_occured = false;
+
+                let dt = t.elapsed().as_secs_f64();
+                println!(
+                    "(th {:?}) frame: {dt} (approx {} fps)",
+                    std::thread::current().id(),
+                    1.0 / dt,
+                );
+
+                t = std::time::Instant::now();
 
                 rot += 90.0 * dt as f32;
                 unsafe {
@@ -607,9 +617,15 @@ pub async fn game_main<'d, Device: br::Device + 'd>(
                         Some(last_render_fence.as_transparent_mut_ref()),
                     )
                     .expect("Failed to submit work");
-                engine
-                    .queue_present(back_buffer_index, &[present_ready.as_transparent_ref()])
-                    .expect("Failed to queue presentation");
+                match engine.queue_present(back_buffer_index, &[present_ready.as_transparent_ref()])
+                {
+                    Ok(_) => (),
+                    Err(br::vk::VK_ERROR_OUT_OF_DATE_KHR) => {
+                        eprintln!("out of date presentation: ignoring");
+                        presentation_suspending = true;
+                    }
+                    Err(e) => Err(e).expect("Failed to present"),
+                }
                 last_render_occured = true;
             }
         }
